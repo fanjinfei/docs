@@ -1,0 +1,32 @@
+ BitVisor - A Thin Hypervisor Built for Enforcing I/O Device Security - Storage (USB/DISK) Encryption or File Access Monitoring
+This post is wrote to share an idea of the paper (BitVisor: A Thin Hypervisor for Enforcing I/O Device Security) that I read recently. It innovates a hypervisor-based solution for enforcing storage/disk encryption of ATA devices.
+As we know that Direct memory access (DMA) is a feature in computer system that allows certain hardware subsystems to directly access main system memory independently of the CPU/processor. 
+
+As shown in picture below (from wikipedia), processor MMU (if present) cannot directly intercept data movement between external DMA-capable devices and the main memory. Even in a virtualization environment, extended page table (EPT or NPT) MMU configured by Hypervisor cannot protect the main memory resource, this is one of reasons of why the technology IOMMU like VT-d (Intel Virtualization Technology for Directed I/O) is introduced to prevent malicious device drivers from attacking against the main memory even hypervisor owned memory space. 
+
+Although the processor has no chance to intercept the data transferred between device and main memory, it still has chances to intercept the access to DMA control data regions like DMA descriptors that store transferring information,
+such as the buffer address and the size of the data. 
+
+Because basically all the DMA host controllers are using some specific command control registers to configure and trigger DMA data transfers. Those registers are commonly represented as I/O based or/and MMIO based registers, the former registers are accessed with I/O port (e.g. IN/OUT or INTS/OUTS instructions in x86 system), and the latter registers are accessed with memory-mapped I/O method with generic memory movement instructions (like MOV instruction).
+
+In x86 virtualization, both accesses with I/O port and MMIO can be monitored by hypervisor (e.g. through I/O port bitmap VMCS configuration, and appropriate EPT page permission settings). 
+
+In BitVisor, a thin hypervisor intercepts any read/write access to the ATA DMA host controller's command-block registers and control-block register. Therefore, it is easy to obtain information necessary to enforce encryption. For example, the hypervisor can obtain the LBA and sector count by intercepting writes to these registers. Similarly, the corresponding ATA disk DMA descriptor can also be monitored and controlled by BitVisor hypervisor. 
+
+With intercepting all the information as mentioned above, the hypervisor has knowledge of where the DMA buffer (physical address) will be transferred to/from, when to start/stop data transfers, and what size in bytes will be transferred to/from external device.
+
+This paper presents a novel idea of shadow DMA descriptors (see Figure below, click it to enlarge) for safely intercepting the content of data transferred by DMA. A shadow DMA descriptor is a shadow of the DMA descriptor of the guest OS (guest DMA descriptor).The hypervisor sets the shadow DMA descriptors to the host controller (rather than the real guest DMA descriptor). The shadow DMA descriptor specifies a memory region controlled by the hypervisor as a temp buffer, called the shadow buffer. 
+
+When data movement starts, the DMA host controller transfers data between the shadow buffer (rather than the real guest buffer) and the device, based on the shadow DMA descriptors. After data movement is completed, the hypervisor emulates the host controller behaviors by copying data between the shadow buffer and the guest buffer that is specified in the real guest DMA descriptor.
+
+Now that hypervisor can fully control and intercept the DMA data content, the encryption and decryption become easy. When guest software writes the data to ATA disk, the hypervisor can enforce encryption from guest buffer to shadow buffer (that eventually goes to disk), and in reverse order when guest software reads data from ATA disk, the hypervisor will decrypt data from shadow buffer (coming from disk) to guest buffer. 
+
+On the other side, as a pretty good side effort, we can utilize this solution to enforce protection from device-specific DMA attacks on a platform that is lack of IOMMU (e.g. VT-d) capability. For instance, the hypervisor can verify the address of guest buffers specified in the guest DMA descriptors so that the address (plus the data size) does not point to the hypervisor memory regions and any other protected guest memory regions.  
+
+As we can see that the hypervisor can capture the event when DMA starts. However, the end of DMA transfer is usually notified by a hardware interrupt, but BitVisor cannot identify the ATA device that issues hardware interrupts. Instead, BitVisor captures I/O access to status registers, because device drivers usually read status registers to check whether DMA transfer has finished successfully or not, and write registers to acknowledge interrupts. As an alternative, the solution in my previous post can solve this issue by monitoring the ATA disk external interrupt.
+
+To download the source code of latest BitVisor, please go to the official site http://www.bitvisor.org/
+
+See below snapshot (and other one BitVisor Summit @2012), it uses the Ring3 layer in VMX-root to hold various services. 
+
+
