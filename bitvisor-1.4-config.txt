@@ -1,0 +1,111 @@
+Overview
+
+Those who heard the announcement of BitVisor Summit 3 in November 2014 know that you know, BitVisor's latest version in Bitbucket specifies validity / invalidity etc. of the pass-through type driver up to BitVisor 1.4 The method has changed and now it is specified using vmm.driver.pci. In this paper, I will describe how to specify it.
+background
+
+The BitVisor setting is done in bit configuration.conf which is used in the config config file edited by make config, the defconfig file embedded in the binary, or the boot / login or boot / login-simple program. The setting of the .config file is interpreted at compile time, reflected by the presence or absence of the link of the module itself or by macro definition. The settings in the defconfig file or the bitvisor.conf file are referenced and reflected in the config as a config structure.
+
+Until BitVisor 1.4, each semi passthru driver himself refers to the config structure itself, checks whether it is enabled, and registers the driver. This method has the following disadvantages.
+
+    When multiple identical devices existed, it was possible to set the validity / invalidity of the driver for all the same devices, but there was no means to set the validity / invalidity of the driver for one specific device (for example It is not possible to target a specific one as multiple Intel NICs are installed etc.)
+    We could not allocate a different driver to a specific device (NIC with new device ID, assign special driver for PCI device concealment etc)
+    Processing for communication contents and access contents was fixed only by setting validity / invalidity of the driver (ATA / AHCI storage is encrypted, NIC is VPN, etc.)
+
+To eliminate these drawbacks, vmm.driver.pci was introduced. We revise the part where each driver referenced the config structure and decide which driver to apply in common processing for PCI devices. Instead of mere 0 and 1, you can specify a device by device ID and PCI bus address by specifying by character string, and you can also pass optional arguments of which function is used for the driver.
+Related research
+
+Before BitVisor 1.4, the PCI device concealment function was implemented. This PCI device concealment function can be applied to arbitrary devices, and it can be applied to vmm.driver.pci_conceal by specifying a character string specifying the device. The character string specified in vmm.driver.pci is a format that evolved what was specified by vmm.driver.pci_conceal.
+
+In Windows 95 and Windows 98 or later Microsoft Windows, from the interface called Device Manager, you can check the list of devices connected to the PC and which device drivers are used for that device, You can switch to the device driver. Detailed information such as the ID and address of the device is stored in a database called a registry. When a device is detected, an entry is automatically created in the registry by Plug and Play, and by changing the entry, It seems that it realizes the function to change the device driver. BitVisor does not keep a database like a registry and decides everything based on the contents described in the config structure.
+How to specify
+Overview
+
+The designation of vmm.driver.pci is a set of three items listed below, one driver is specified, a plurality of chunks are concatenated with and and then concatenated to one character string by a delimiter It will be what you did.
+
+    Device specification (optional)
+    Specifying the driver
+    Specifying driver options (optional)
+
+For example, suppose you want to assign the ahci driver to the device with the PCI address 00: 1 f.2 and the rtl8169 driver as the VPN connection to the device with the PCI address 02: 00.0. In this example, first of all, we make two chunks. The first one specifies the ahci driver.
+
+    Device specification: PCI address 00: 1 f.2
+    Driver's specification: ahci
+    Specifying the driver option: None
+
+The second one specifies the rtl 8169 driver.
+
+    Device specification: PCI address 02: 00.0
+    Driver specification: rtl 8169
+    Specifying driver options: VPN connection
+
+Repeat these into actual strings to be used, and concatenate them with and between them as follows.
+
+    slot = 00: 1 f.2
+    driver = ahci
+    and
+    slot = 02: 00.0
+    driver = rtl 8169
+    net = vpn
+
+Finally, we concatenate them with a delimiter.
+
+slot = 00: 1 f.2, driver = ahci, and, slot = 02: 00.0, driver = rtl 8169, net = vpn
+
+For each condition delimited by and, matching is done in order from the beginning. Even if you write multiple identical device specifications that are exactly the same, the first one is always established, and the one written after it is ignored.
+What can be specified as device designation
+
+The items that can be specified as device specifications are as follows.
+drivers / pci_match.c
+
+   slot =% 02x:% 02x.% u (bus_no, device_no, func_no)
+   class =% 04x (class_code >> 8)
+   id =% 04x:% 04x (vendor_id, device_id)
+   subsystem =% 04x:% 04x (sub_vendor_id, sub_device_id)
+   revision =% 02x (revision_id)
+   rev =% 02x (revision_id)
+   programming_interface =% 02x (programming_interface)
+   if =% 02x (programming_interface)
+   class_code =% 06x (class_code)
+   header_type =% 02x (header_type)
+   device =% s (device name)
+   number =% d (number)
+
+slot is the PCI addressing used in the example above. Class to header_type represent information in the PCI configuration space, respectively. device is a specification method to select based on the device list that the driver has. For example, specifying device = ahci has the same meaning as specifying class_code = 010601. You can not specify the driver name of the driver removed from compilation by make config.
+
+number specifies the number of devices that are limited by the specification so far, 0 is the first device. For example, if device = rtl 8169, number = 0, it means that the first rtl 8169 device found.
+
+When more than one condition is specified, basically it will be "and", but for number only the position you specify has meaning. If class_code = 010601, number = 1, id = 0000: 1111, the condition is satisfied when the second found class_code = 010601 device is ID 0000: 1111 but id = 0000: 1111, number = 1 , class_code = 010601, the condition is satisfied if the second device found with id = 0000: 1111 is class_code = 010601.
+
+Multiple or conditions can be specified on the right side of each item by delimiting it with a | symbol. Writing id = 0000: 1111 | 2222: 3333 means id = 0000: 1111 or id = 2222: 3333. You can also use * and? As wild cards. This is generally equivalent to the wildcard used in the file name. For example, if you specify id = 0000: *, it represents all devices whose vendor ID is 0000.
+
+If the device specification is omitted, it is assumed that the driver name is specified for device based on the next driver specification. For example, if only driver = ahci is specified, device = ahci, driver = ahci is assumed to be specified. This is a simplified version of what I'm likely to be redundant when I want to make settings similar to BitVisor 1.4.
+Specifying the driver
+
+Driver specification is in the form of driver = driver name. Driver names are as follows.
+
+    ahci
+    ata
+    bnx
+    conceal
+    ehci
+    ieee 1394
+    ieee 1394 log
+    monitor
+    pro 100
+    pro 1000
+    raid
+    rtl 8169
+    uhci
+    vga_intel
+    x540
+
+As mentioned above, each driver usually has a device list. However, conceal is a special driver for PCI device concealment and does not have a device list. (To be precise, we have the condition that it does not match any device, so if we write device = conceal the condition will not be met.)
+
+Like conceal, monitor does not have a device list. This is a driver for monitoring PCI device I / O.
+
+Besides this, there is driver = none as a special driver specification. This is used in situations where the driver does not want to assign what matches the condition. Each condition separated by "and" is checked sequentially from the beginning, and it is used to write conditions such as wanting to exclude only devices with specific conditions and want to target others. For example, if the first ahci device you wish to pass through is pass-through, and you want to hide others, write device = ahci, number = 0, driver = none, and, device = ahci, driver = conceal.
+Specifying driver options
+
+Driver options depend on the driver. If you are a network driver you have the following.
+
+    net (all network drivers): network
