@@ -1,0 +1,27 @@
+1. Install
+#sudo apt install qemu seabios sgabios
+
+2.debug seabio, without VGA card, redirect serial I/O to console
+#qemu-system-x86_64 -cdrom ~/host/TinyCorePure64-8.0.iso -bios 
+	~/src/tinyvisor/bios/out/bios.bn -vga none -nographic
+
+3.use sgabios
+  make menuconfig
+  #without VGA
+  #enable keyboard,mouse
+  #debug level 3
+
+4.build seabios with coreboot
+  #no low-level chipset init needed, Memory is ready, 
+
+5. Some common task
+  5.1 boot cdrom+hd from hd order=c, from cdrom order=d
+    #qemu-system-x86_64 -cdrom ~/host/TinyCorePure64-8.0.iso -hda ~/src/data/qemu_tc.img
+		  -serial stdio -boot order=d/c
+    #prepare TinyCore: boot cdrom, set proxy, tce-load -wi tc-install, tc-install.sh
+                       boot hd, set proxy, tce search package, install grub2-multi
+                       boot cdrom, grub-install HD
+  5.2 boot hd+seabios
+    -- first prepare tc,grub to use ttyS0
+    #qemu-system-x86_64  -hda data/qemu_tc.img   -bios bios/out/bios.bin 
+	 -seryial stdio -vga none
