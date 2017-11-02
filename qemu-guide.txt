@@ -23,5 +23,11 @@
                        boot cdrom, grub-install HD
   5.2 boot hd+seabios
     -- first prepare tc,grub to use ttyS0
+    -- second, remix tc corepure64.gz: /etc/inittab add ttyS0
+    -- pciutils usbutils.tcz to show hw
+    -- tce to search
     #qemu-system-x86_64  -hda data/qemu_tc.img   -bios bios/out/bios.bin 
 	 -seryial stdio -vga none
+  
+  5.3 qemu in console: No GUI of qemu --nographic --serial mon:sdtio
+
