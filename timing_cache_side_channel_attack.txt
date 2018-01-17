@@ -1,0 +1,17 @@
+A page is the smallest unit of data for memory management in a virtual memory operating system. That means when data is moved in and out of caches it is moved in chunks of at least 1 page.
+
+In the simplest case lets assume the attacker is interested in a single byte of memory. Lets say this byte is at address 0. The attacker sets up an array which is 256 pages long. Lets call this array "page_array". They then trick the processor into performing the following -
+
+1. load address 0 into register[X]
+2. load the byte at page_array[PAGE_SIZE * register[x]] into register[y].
+   // PAGE_SIZE would usually be 4096
+
+The CPU then realizes its mistake and undoes all of the above. But meanwhile the page containing page_array[PAGE_SIZE * register[x]] has been fetched and is sitting in the cache. i.e if the value were 1 you would expect -
+
+    bytes at page_array[0 to 4095] to be unlikely to be in the cache.
+    bytes at page_array[4096 to 8191] to be likely to be in the cache.
+    bytes at page_array[8192+] to be unlikely to be in the cache.
+
+By timing access to page_array[PAGE_SIZE * i] for i in the range 0 to 255 the pages which load fastest are almost certainly in the cache. The difference is large enough that by selecting an appropriate threshold you should be able to somewhat reliably discern between a hit and a miss.
+
+By repeating the same process multiple times and taking special steps to flush the array out of the cache before indexing into it a malicious actor can reach a point where they have the correct value with a very high statistical probability.
