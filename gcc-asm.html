@@ -1,0 +1,218 @@
+
+<!DOCTYPE html>
+<head>
+  <title>A Tiny Guide to GCC Inline Assembly / ericw.ca Eric Woroshow</title>
+
+  <meta http-equiv='Content-Type' content='text/html; charset=utf-8' />
+  <meta name='description' content='The site and blog of Eric Woroshow' />
+  <meta name='author' content='Eric Woroshow' />
+
+</head>
+<body>
+  <div id='header'>
+    <h1><a href='/'>eric<span class='highlight'>w</span>.</a></h1>
+  </div>
+  <div id='container'>
+    <div class='post'>
+  <h1 class='title'>A Tiny Guide to GCC Inline Assembly <span class='date'>12 Jun 2008</span></h1>
+  <div class='body'>
+  <p>So I’m working on a real-time operating system for school, and in the process
+I’ve needed to write a ton of IA32 inline assembly. GCC’s inline assembly
+syntax isn’t immediately straightforward so it’s been an interesting process of
+trial, error, and documentation to piece together the specifics. This guide
+presents my accumulated knowledge on the subject.</p>
+
+<h2 id="assembly-syntax">Assembly Syntax</h2>
+
+<p>GCC uses AT&amp;T assembly syntax. The highlights:</p>
+
+<ul>
+  <li><strong>instruction source, destination</strong><br />
+The first operand is the source, the second is the destination.</li>
+  <li><strong>%register</strong><br />
+Register names are prefixed with a percent sign. (Or a <code class="highlighter-rouge">%%</code> in certain
+circumstances; see the second on operands below.)</li>
+  <li><strong>$literal</strong><br />
+Literal values are prefixed with a dollar sign. The literal <code class="highlighter-rouge">$10</code> specifies
+decimal 10 while <code class="highlighter-rouge">$0x10</code> specifies hexadecimal 16.</li>
+  <li><strong>instruction{b,w,l}</strong><br />
+The instruction suffix denotes the operand size. The <code class="highlighter-rouge">b</code>, <code class="highlighter-rouge">w</code>, and <code class="highlighter-rouge">l</code> specify byte (8-bit), word (16-bit), and long word (32-bit) memory references. (Always include the size! If you omit it the GNU assembler will attempt to guess for you which is usually a Bad Idea.)</li>
+  <li><strong>segment:offset(base, index, scale)</strong><br />
+Memory access syntax. Note that the offset and scale constants are <em>not</em> prefixed with <code class="highlighter-rouge">$</code> but the register references still need a <code class="highlighter-rouge">%</code>.</li>
+  <li><strong>ljmp/lcall $segment, $offset</strong><br />
+Control transfer instructions may be prefixed with an <code class="highlighter-rouge">l</code> to indicate a far jump
+to another code segment. (Similarly, there is <code class="highlighter-rouge">lret $stackadjust</code>.)</li>
+  <li><strong>*branch-address</strong><br />
+Branch addressing using literals or registers is prefixed with an asterisk.</li>
+</ul>
+
+<p>Here are a few examples of valid code that illustrate these points.</p>
+
+<figure class="highlight"><pre><code class="language-gas" data-lang="gas">    pushl %eax
+    movl $8, %ebx
+    movb $0x11, %al
+    movl %es:16(%ebx, %edi, 4), %eax
+    ret *100
+    jmp *%ecx
+    lcall $0x10, farcalllabel
+    </code></pre></figure>
+
+<h2 id="inline-syntax">Inline Syntax</h2>
+
+<p>The basic format for GCC inline assembly is as follows.</p>
+
+<figure class="highlight"><pre><code class="language-c" data-lang="c">    <span class="n">__asm__</span>
+    <span class="n">__volatile__</span>      <span class="cm">/* optional */</span>
+    <span class="p">(</span>
+    <span class="n">assembly</span> <span class="n">code</span>
+    <span class="o">:</span> <span class="n">output</span> <span class="n">operands</span> <span class="cm">/* optional */</span>
+    <span class="o">:</span> <span class="n">input</span> <span class="n">operands</span>  <span class="cm">/* optional */</span>
+    <span class="o">:</span> <span class="n">clobber</span> <span class="n">list</span>    <span class="cm">/* optional */</span>
+    <span class="p">);</span>
+    </code></pre></figure>
+
+<p>For example, below is code to turn on bit 1 in <code class="highlighter-rouge">flag</code> then store the value in <code class="highlighter-rouge">new_flag</code>.</p>
+
+<figure class="highlight"><pre><code class="language-c" data-lang="c">    <span class="kt">int</span> <span class="n">flag</span><span class="p">,</span> <span class="n">new_flag</span><span class="p">;</span>
+    <span class="n">__asm__</span>
+    <span class="p">(</span>
+    <span class="s">"movl %1, %%eax </span><span class="se">\n</span><span class="s">"</span>
+    <span class="s">"orw $2, %%ax </span><span class="se">\n</span><span class="s">"</span>
+    <span class="s">"movl %%ax, %0 </span><span class="se">\n</span><span class="s">"</span>
+    <span class="o">:</span> <span class="s">"=r"</span><span class="p">(</span><span class="n">new_flag</span><span class="p">)</span> <span class="cm">/* output */</span>
+    <span class="o">:</span> <span class="s">"r"</span><span class="p">(</span><span class="n">flag</span><span class="p">)</span>      <span class="cm">/* input */</span>
+    <span class="o">:</span> <span class="s">"%eax"</span>         <span class="cm">/* clobbered register */</span>
+    <span class="p">);</span>
+    </code></pre></figure>
+
+<h4 id="preamble">Preamble</h4>
+
+<p>The <code class="highlighter-rouge">__asm__</code> keyword marks the start of the inline assembly statement. While
+using <code class="highlighter-rouge">asm</code> without the underscores is also valid in some contexts, it will not
+compile with the <code class="highlighter-rouge">-std=c99</code> option. Moreover, the underscores prevent conflicts
+with <code class="highlighter-rouge">asm</code> defined elsewhere in your code.</p>
+
+<p>The optional <code class="highlighter-rouge">__volatile__</code> keyword indicates the assembly code has important
+side-effects and guarantees GCC will not delete it if it is reachable. It does
+not, however, guarantee that the assembly code will not be moved relative to
+other code.</p>
+
+<h4 id="code">Code</h4>
+
+<p>The assembly code specifies the instructions to execute. Each instruction (or
+label) is enclosed within double quotes and terminated by a newline.</p>
+
+<h4 id="operands">Operands</h4>
+
+<p>The general pattern for an operand is <code class="highlighter-rouge">"constraint"(expression)</code> and multiple
+operands are separated by commas.</p>
+
+<p>In the assembly code each operand is reference by number, where <code class="highlighter-rouge">%0</code> is the
+first output operand, <code class="highlighter-rouge">%1</code> is the second, and so on, and <code class="highlighter-rouge">%N-1</code> is the last
+input operand. Because the operands are indicated by a percent sign the
+register names must now be prefixed with two percent signs, like <code class="highlighter-rouge">%%eax</code>.</p>
+
+<p>C expressions provide the input and output operands for the assembly code. An
+output expression (an lvalue) specifies where a result should be stored. An
+input expression specifies either a location (lvalue) or value (rvalue) as
+input to the code.</p>
+
+<p>Constraints help to decided the addressing mode and registers used for the
+input and output operands. Of the many constraints available, only a few
+are used frequently. These we discuss below.</p>
+
+<ul>
+  <li><strong>m</strong>: The operand is stored in memory, at any memory address. (Instructions
+will operate on the data directly in memory.)</li>
+  <li><strong>r</strong>: The operand is stored in a general-purpose register. (GCC generates
+code to transfer the operand to or from memory and the register it chooses.)</li>
+  <li><strong>i</strong>: The operand is an immediate integer.</li>
+  <li><strong>0,…,9</strong>: The operand matches the operand with the specified number. (GCC
+will use the same variable for both operands. The two operands that match
+must be one input-only operand and one output-only operand.)</li>
+</ul>
+
+<p>Constraints may also have modifiers which provide additional control over the
+behavior of the operands. Three common constraints are:</p>
+
+<ul>
+  <li><strong>=</strong>: Operand is write-only</li>
+  <li><strong>+</strong>: Operand is both read and written</li>
+  <li><strong>&amp;</strong>: Operand is clobbered early (i.e., is modified before the instruction
+is finished using the input operands, meaning it may not lie in a register
+used as an input operand or any part of memory)</li>
+</ul>
+
+<h4 id="clobber-list">Clobber List</h4>
+
+<p>The clobber list should contain:</p>
+
+<ul>
+  <li>The registers modified, either explicitly or implicitly, by your code.</li>
+  <li>If your code modifies the condition code register, “cc”.</li>
+  <li>If your code modifies memory, “memory”.</li>
+</ul>
+
+<p>The clobber list informs GCC of the state potentially changed by your code so
+it won’t make incorrect assumptions about the state and break things (always a
+Bad Thing).</p>
+
+<h2 id="examples">Examples</h2>
+
+<p>To further illustrate all the stuff stuffed into this guide, I’ve pulled a few
+examples from my operating system.</p>
+
+<p>To load the interrupt descriptor table register:</p>
+
+<figure class="highlight"><pre><code class="language-c" data-lang="c">    <span class="kt">void</span> <span class="nf">set_idt</span> <span class="p">(</span><span class="n">idt_pointer_t</span> <span class="o">*</span><span class="n">ptr</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">__asm__</span> <span class="n">__volatile__</span> <span class="p">(</span>
+        <span class="s">"lidt %0 </span><span class="se">\n</span><span class="s">"</span> <span class="o">:</span> <span class="o">:</span> <span class="s">"m"</span><span class="p">(</span><span class="n">ptr</span><span class="p">)</span> <span class="p">);</span>
+    <span class="p">}</span>
+    </code></pre></figure>
+
+<p>To set the kernel code segment:</p>
+
+<figure class="highlight"><pre><code class="language-c" data-lang="c">    <span class="kt">void</span> <span class="nf">set_kcs</span> <span class="p">()</span> <span class="p">{</span>
+        <span class="n">__asm__</span> <span class="n">__volatile__</span> <span class="p">(</span>
+        <span class="s">"ljmp %0, $farjmp </span><span class="se">\n</span><span class="s">"</span>
+        <span class="s">"farjmp: </span><span class="se">\n</span><span class="s">"</span>
+        <span class="s">"nop </span><span class="se">\n</span><span class="s">"</span>
+        <span class="o">:</span> <span class="s">"i"</span><span class="p">(</span><span class="n">KERNEL_SEG_CODE</span><span class="p">)</span> <span class="p">);</span>
+    <span class="p">}</span>
+    </code></pre></figure>
+
+<p>To move bytes:</p>
+
+<figure class="highlight"><pre><code class="language-c" data-lang="c">    <span class="kt">void</span> <span class="nf">kcopy</span> <span class="p">(</span><span class="kt">unsigned</span> <span class="kt">int</span> <span class="n">src</span><span class="p">,</span> <span class="kt">unsigned</span> <span class="kt">int</span> <span class="n">dst</span><span class="p">,</span>
+                <span class="kt">unsigned</span> <span class="kt">int</span> <span class="n">nbytes</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">__asm__</span> <span class="n">__volatile__</span> <span class="p">(</span>
+        <span class="s">"cld </span><span class="se">\n</span><span class="s">"</span>
+        <span class="s">"rep </span><span class="se">\n</span><span class="s">"</span>
+        <span class="s">"movsb </span><span class="se">\n</span><span class="s">"</span>
+        <span class="o">:</span>
+        <span class="o">:</span> <span class="s">"S"</span><span class="p">(</span><span class="n">src</span><span class="p">),</span> <span class="s">"D"</span><span class="p">(</span><span class="n">dst</span><span class="p">),</span> <span class="s">"c"</span><span class="p">(</span><span class="n">nbytes</span><span class="p">)</span>
+        <span class="o">:</span> <span class="s">"%esi"</span><span class="p">,</span> <span class="s">"%edi"</span><span class="p">,</span> <span class="s">"%ecx"</span> <span class="p">);</span>
+    <span class="p">}</span>
+    </code></pre></figure>
+
+<h2 id="references">References</h2>
+
+<p>I pulled this information from a variety of sources, chief among them:</p>
+
+<ul>
+  <li><a href="http://gcc.gnu.org/onlinedocs/gcc-4.3.0/gcc/Extended-Asm.html#Extended-Asm">GCC Extended Asm manual</a></li>
+  <li><a href="http://sourceware.org/binutils/docs-2.18/as/index.html">GNU as manual</a></li>
+  <li><a href="http://www.ibiblio.org/gferg/ldp/GCC-Inline-Assembly-HOWTO.html">GCC-Inline-Assemby-HOWTO</a></li>
+</ul>
+
+
+  </div>
+</div>
+
+    <p id='footer'>
+      ericw.ca / Content &copy; 2009-2017 Eric Woroshow. All rights reserved.
+      <br/>Code under <a href='/license.html'>MIT license</a> unless otherwise noted.
+    </p>
+  </div>
+</body>
+
