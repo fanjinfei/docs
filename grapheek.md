@@ -1,3 +1,4 @@
+http://www.nidus.fr/blog/grapheekdb-base-graphe-python/#grapheekdb-choix-techniques-initiaux  
 [1.] How did I come to develop my own graph base:
 ------------------
 > ``
